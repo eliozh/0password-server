@@ -8,7 +8,7 @@
 
 from flask_restful import Api
 
-from api.v1.auth.views import Register, SendVerifyEmail, Verify
+from api.v1.auth.views import Register, SendVerifyEmail, Verify, Sync
 
 
 def init_api(api):
@@ -17,3 +17,5 @@ def init_api(api):
     api.add_resource(SendVerifyEmail, '/auth/send-verify-email')
 
     api.add_resource(Verify, '/auth/verify/<token>')
+
+    api.add_resource(Sync, '/auth/sync/<token>')

@@ -28,6 +28,7 @@ SQLALCHEMY_TRACK_MODIFICATIONS = True
 # redis token prefix
 verify_token_valid_prefix = 'VERIFY_TOKEN_VALID_'
 verify_send_delay_prefix = 'VERIFY_SEND_DELAY_'
+sync_delay_prefix = 'SYNC_DELAY_'
 
 # email
 MAIL_SERVER = 'smtp.163.com'

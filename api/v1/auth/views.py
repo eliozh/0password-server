@@ -11,7 +11,7 @@ import string
 import random
 import os
 
-from flask import request
+from flask import request, Response, send_file
 from flask_restful import Resource
 from flask_mail import Message
 
@@ -22,9 +22,9 @@ from common.redis import redis_db
 from common.serializer import s
 from common.mail import mail
 from utils.utils import get_random_string
-from utils.crypto import generate_password_sqlite
-from utils import crypto
-from settings import verify_send_delay_prefix, verify_token_valid_prefix, SALT
+from utils.crypto import generate_password_sqlite, compute_2skd, opb64e
+# from utils import crypto
+from settings import sync_delay_prefix, verify_send_delay_prefix, verify_token_valid_prefix, SALT
 
 
 class Register(Resource):
@@ -39,7 +39,7 @@ class Register(Resource):
             first_name = request.json.get('first_name').strip()
             last_name = request.json.get('last_name').strip()
             email = request.json.get('email').strip().lower()
-            password = request.json.get('password').strip()
+            password = request.json.get('password')
         except Exception as e:
             logging.info('invalid. ' + str(e))
             return {'message': 'error'}, 500
@@ -75,9 +75,9 @@ class Register(Resource):
         secret_key = '-'.join([version, account_id, secret])
 
         # algorithm SRPg-4096 for SRP-X.
-        srp_x = crypto.compute_2skd(secret_key, password, email, srp_salt.encode('utf-8'), srp_iterations, 'SRPg-4096')
+        srp_x = compute_2skd(secret_key, password, email, srp_salt.encode('utf-8'), srp_iterations, 'SRPg-4096')
 
-        srp_x = crypto.opb64e(srp_x)
+        srp_x = opb64e(srp_x)
 
         # generate sqlite file.
         sqlite_path = os.path.join(BASE_DIR, 'tmp', account_id + '.db')
@@ -116,18 +116,28 @@ class SendVerifyEmail(Resource):
         # get email.
         try:
             email = request.json.get('email').strip().lower()
+            password = request.json.get('email')
+            secret_key = request.json.get('secret_key').strip()
         except Exception as e:
             logging.info('' + str(e))
             return {'message': 'error'}, 500
 
         # check if any field is none.
-        if email is None:
+        if email is None or password is None or secret_key is None:
             return {'message': 'error'}, 500
 
         # check if user existed or verified.
         user = User.query.filter_by(email=email).first()
         if user is None:
             return {'message': 'error'}, 500
+
+        # check password and secret key.
+        srp_x = compute_2skd(secret_key, password, email, user.srp_salt.encode('utf-8'),
+                             iterations=user.srp_iterations, algorithm='SRPg-4096')
+        if opb64e(srp_x) != user.srp_x:
+            return {'message': 'error'}, 500
+
+        # check if user is verified.
         if user.verified:
             return {'message': 'error'}, 500
 
@@ -197,3 +207,48 @@ class Verify(Resource):
         db.session.commit()
 
         return {'email': data['email'], 'message': 'success'}
+
+
+class Sync(Resource):
+
+    @staticmethod
+    def post(token):
+        try:
+            # get email, password, secret key
+            email = request.json.get('email').strip().lower()
+            password = request.json.get('password')
+            secret_key = request.json.get('secret_key').strip()
+        except Exception as e:
+            logging.info('invalid. ' + str(e))
+            return {'message': 'error'}, 500
+
+        # check if any field is none.
+        if email is None or password is None or secret_key is None:
+            logging.info('error.')
+            return {'message': 'error'}, 500
+
+        # check if user existed.
+        user = User.query.filter_by(email=email).first()
+        if user is None:
+            return {'message': 'error'}, 500
+
+        # check password and secret key.
+        srp_x = compute_2skd(secret_key, password, email, user.srp_salt.encode('utf-8'),
+                             iterations=user.srp_iterations, algorithm='SRPg-4096')
+        if opb64e(srp_x) != user.srp_x:
+            return {'message': 'error'}, 500
+
+        # check if user is verified.
+        if not user.verified:
+            return {'message': 'error'}, 500
+
+        # check if this account has sync recently.
+        delay = redis_db.pttl()
+        if delay != -2:  # key exists.
+            return {'message': 'error'}, 500
+
+        blob = user.sqlite_data
+
+        redis_db.set_redis_token(sync_delay_prefix + email, 1, expire_time=60 * 5)
+
+        return Response(response=blob, content_type='application/octet-stream')
