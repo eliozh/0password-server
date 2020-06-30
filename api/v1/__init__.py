@@ -12,7 +12,7 @@ from api.v1.auth import init_api as auth_init_api
 
 
 def create_api():
-    api = Api(prefix='/api/v1/')
+    api = Api(prefix='/0password/api/v1/')
     auth_init_api(api)
 
     return api

@@ -10,6 +10,7 @@ import logging
 import string
 import random
 import os
+import io
 
 from flask import request, Response, send_file
 from flask_restful import Resource
@@ -23,8 +24,13 @@ from common.serializer import s
 from common.mail import mail
 from utils.utils import get_random_string
 from utils.crypto import generate_password_sqlite, compute_2skd, opb64e
-# from utils import crypto
 from settings import sync_delay_prefix, verify_send_delay_prefix, verify_token_valid_prefix, SALT
+
+
+class Index(Resource):
+    @staticmethod
+    def get():
+        return {'message': 'index'}
 
 
 class Register(Resource):
@@ -42,17 +48,17 @@ class Register(Resource):
             password = request.json.get('password')
         except Exception as e:
             logging.info('invalid. ' + str(e))
-            return {'message': 'error'}, 500
+            return {'message': '请求参数不完整'}, 200
 
         # check if any field is none.
         if first_name is None or last_name is None or email is None or password is None:
             logging.info('error.')
-            return {'message': 'error'}, 500
+            return {'message': '请求参数不完整'}, 200
 
         # check if user existed.
         user = User.query.filter_by(email=email).first()
         if user is not None:
-            return {'message': 'error'}, 500
+            return {'message': '该邮箱已被注册'}, 200
 
         # check if account id existed.
         account_id = get_random_string(6, string.ascii_uppercase + string.digits)
@@ -66,8 +72,8 @@ class Register(Resource):
 
         version = 'A1'
 
-        password_iterations = random.randint(50000, 100000)
-        srp_iterations = random.randint(50000, 100000)
+        password_iterations = random.randint(20000, 100000)
+        srp_iterations = random.randint(20000, 100000)
 
         secret = get_random_string(6, string.ascii_uppercase + string.digits) + '-'
         secret += '-'.join(get_random_string(5, string.ascii_uppercase + string.digits) for _ in range(4))
@@ -111,40 +117,41 @@ class Register(Resource):
 
 
 class SendVerifyEmail(Resource):
+
     @staticmethod
     def post():
         # get email.
         try:
             email = request.json.get('email').strip().lower()
-            password = request.json.get('email')
+            password = request.json.get('password')
             secret_key = request.json.get('secret_key').strip()
         except Exception as e:
             logging.info('' + str(e))
-            return {'message': 'error'}, 500
+            return {'message': '请求参数不完整'}, 200
 
         # check if any field is none.
         if email is None or password is None or secret_key is None:
-            return {'message': 'error'}, 500
+            return {'message': '请求参数不完整'}, 200
 
         # check if user existed or verified.
         user = User.query.filter_by(email=email).first()
         if user is None:
-            return {'message': 'error'}, 500
+            return {'message': '该邮箱未注册'}, 200
 
         # check password and secret key.
         srp_x = compute_2skd(secret_key, password, email, user.srp_salt.encode('utf-8'),
                              iterations=user.srp_iterations, algorithm='SRPg-4096')
         if opb64e(srp_x) != user.srp_x:
-            return {'message': 'error'}, 500
+            return {'message': '密码或 Secret key 错误'}, 200
 
         # check if user is verified.
         if user.verified:
-            return {'message': 'error'}, 500
+            return {'message': '该用户已验证邮箱'}, 200
 
         # check if email has been sent recently
         delay = redis_db.pttl(verify_send_delay_prefix + email)
         if delay != -2:  # key exists.
-            return {'message': 'error'}, 500
+            return {'message': '发送邮件频繁', 'delay': delay}, 200
 
         # generate verify code
         verify = get_random_string(6, string.ascii_uppercase + string.digits)
@@ -162,7 +169,7 @@ class SendVerifyEmail(Resource):
             mail.send(msg)
         except Exception as e:
             logging.info('' + str(e))
-            return {'message': 'error'}, 500
+            return {'message': '发送邮件失败'}, 200
 
         redis_db.set_redis_token(verify_token_valid_prefix + email, token + verify, expire_time=60 * 30)
         redis_db.set_redis_token(verify_send_delay_prefix + email, 1, expire_time=60)
@@ -171,6 +178,7 @@ class SendVerifyEmail(Resource):
 
 
 class Verify(Resource):
+
     @staticmethod
     def post(token):
         # get verify
@@ -178,27 +186,27 @@ class Verify(Resource):
             verify = request.json.get('verify').upper()
         except Exception as e:
             logging.info('' + str(e))
-            return {'message': 'error'}, 500
+            return {'message': '请求参数不完整'}, 200
 
         # check if token is valid.
         try:
             data = s.loads(token, salt=SALT)
         except Exception as e:
             logging.info('' + str(e))
-            return {'message': 'error'}, 500
+            return {'message': 'token 已过期'}, 200
 
         # get saved verify code.
         value = redis_db.get_redis_token(verify_token_valid_prefix + data['email'])
         if value is None:
-            return {'message': 'error'}, 500
+            return {'message': '验证码已过期'}, 200
 
         # check if it is the lasted token.
         if token != value[:-6]:
-            return {'message': 'error'}, 500
+            return {'message': '验证码已过期'}, 200
 
         # check verify.
         if verify != value[-6:]:
-            return {'message': 'error'}, 500
+            return {'message': '验证码错误'}, 200
 
         # confirm user
         user = User.query.filter_by(email=data['email']).first()
@@ -212,43 +220,61 @@ class Verify(Resource):
 class Sync(Resource):
 
     @staticmethod
-    def post(token):
+    def post():
         try:
             # get email, password, secret key
             email = request.json.get('email').strip().lower()
             password = request.json.get('password')
             secret_key = request.json.get('secret_key').strip()
+            fmt = request.json.get('fmt', None).strip()
         except Exception as e:
             logging.info('invalid. ' + str(e))
-            return {'message': 'error'}, 500
+            return {'message': '请求参数不完整'}, 200
 
         # check if any field is none.
         if email is None or password is None or secret_key is None:
             logging.info('error.')
-            return {'message': 'error'}, 500
+            return {'message': '请求参数不完整'}, 200
 
         # check if user existed.
         user = User.query.filter_by(email=email).first()
         if user is None:
-            return {'message': 'error'}, 500
+            return {'message': '该邮箱未注册'}, 200
 
         # check password and secret key.
         srp_x = compute_2skd(secret_key, password, email, user.srp_salt.encode('utf-8'),
                              iterations=user.srp_iterations, algorithm='SRPg-4096')
         if opb64e(srp_x) != user.srp_x:
-            return {'message': 'error'}, 500
+            return {'message': '密码或 Secret key 错误'}, 200
 
         # check if user is verified.
         if not user.verified:
-            return {'message': 'error'}, 500
+            return {'message': '该用户未验证邮箱'}, 200
 
         # check if this account has sync recently.
-        delay = redis_db.pttl()
-        if delay != -2:  # key exists.
-            return {'message': 'error'}, 500
+        delay = redis_db.pttl(sync_delay_prefix + email)
+        # if delay != -2:  # key exists.
+        #     return {'message': '同步过于频繁'}, 200
 
         blob = user.sqlite_data
 
         redis_db.set_redis_token(sync_delay_prefix + email, 1, expire_time=60 * 5)
 
-        return Response(response=blob, content_type='application/octet-stream')
+        # blob = list(blob)
+        #
+        # # return Response(response=blob, content_type='application/octet-stream')
+        # return blob
+
+        if fmt == 'blob':
+            return Response(response=blob, content_type='application/octet-stream')
+        else:
+            blob = list(blob)
+            return blob
+
+
+class Upload(Resource):
+
+    @staticmethod
+    def post():
+        msg = 'success'
+        return msg

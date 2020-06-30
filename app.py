@@ -9,6 +9,7 @@
 import os
 
 from flask import Flask
+from flask_cors import CORS
 
 from api import init_api
 from common.database import db
@@ -19,6 +20,8 @@ def create_app():
 
     # Create a flask app.
     app = Flask(__name__)
+
+    cors = CORS(app)
 
     # Set config from config.py.
     app.config.from_pyfile(os.path.join(os.getcwd(), 'settings.py'))
@@ -49,4 +52,4 @@ if __name__ == '__main__':
     # initialize api for app.
     init_api(app)
 
-    app.run(host='0.0.0.0', port=8000, debug=False, use_reloader=True)
+    app.run(host='0.0.0.0', port=8000, debug=True, use_reloader=True)
