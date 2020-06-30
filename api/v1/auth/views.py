@@ -276,5 +276,36 @@ class Upload(Resource):
 
     @staticmethod
     def post():
-        msg = 'success'
-        return msg
+        try:
+            # get email, password, secret key
+            email = request.values.get('email').strip().lower()
+            password = request.values.get('password')
+            secret_key = request.json.get('secret_key').strip()
+        except Exception as e:
+            logging.info('invalid. ' + str(e))
+            return {'message': '请求参数不完整'}, 200
+
+        # check if any field is None.
+        if email is None or password is None or secret_key is None:
+            logging.info('error.')
+            return {'message': '请求参数不完整'}, 200
+
+        # check if user existed.
+        user = User.query.filter_by(email=email).first()
+        if user is None:
+            return {'message': '该邮箱未注册'}, 200
+
+        # check password and secret key.
+        srp_x = compute_2skd(secret_key, password, email, user.srp_salt.encode('utf-8'),
+                             iterations=user.srp_iterations, algorithm='SRPg-4096')
+        if opb64e(srp_x) != user.srp_x:
+            return {'message': '密码或 Secret key 错误'}, 200
+
+        # check if user is verified.
+        if not user.verified:
+            return {'message': '该用户未验证邮箱'}, 200
+
+        blob = request.files['attachment'].stream.read()
+        user.sqlite_data = blob
+
+        return {'message': 'success'}

@@ -82,7 +82,7 @@ def generate_password_sqlite(sk: str, password: str, email: str, first_name: str
     vault_access_key = VaultAccess(enc_vault_key=enc_vault_key.serialize(return_str=True))
 
     account = Account(
-        email=email,
+        user_email=email,
         enc_login=opb64e(enc_login).decode('utf-8'),
         first_name=first_name,
         last_name=last_name

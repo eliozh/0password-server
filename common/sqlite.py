@@ -17,7 +17,7 @@ class Account(Base):
     __tablename__ = 'accounts'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    email = Column(Text(length=-1), unique=True)
+    user_email = Column(Text(length=-1), unique=True)
     enc_login = Column(Text(length=-1))
     first_name = Column(Text(length=-1))
     last_name = Column(Text(length=-1))
