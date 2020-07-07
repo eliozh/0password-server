@@ -24,7 +24,7 @@ from utils.utils import opb64e, generate_key, bytes_pad
 from utils.AESGCM import AES256GCM
 from utils.RSACipher import RSACipher
 from utils.EncJSON import EncJSON
-from common.sqlite import Account, Keysets, VaultAccess, Config, Base
+from common.sqlite import Account, Keysets, VaultAccess, Config, Base, Items
 
 
 def generate_password_sqlite(sk: str, password: str, email: str, first_name: str, last_name: str, sqlite_path: str):
@@ -71,6 +71,20 @@ def generate_password_sqlite(sk: str, password: str, email: str, first_name: str
         rsa_key.encrypt(vault_access_key.key_serialize(return_str=True).encode('utf-8'))).decode('utf-8')
     enc_vault_key = EncJSON(enc=rsa_key.key.alg, kid=rsa_key.kid, data=enc_vault_key_data)
 
+    details = {
+        'title': '请输入标题',
+        'username': '请输入用户名',
+        'password': '请输入密码',
+        'weburl': '请输入url',
+        'ps': []
+    }
+
+    iv, ct = vault_access_key.encrypt(json.dumps(details).encode('utf-8'))
+    details = {'enc': vault_access_key.key.alg, 'kid': vault_access_key.kid.decode('utf-8'), 'iv': opb64e(iv).decode('utf-8'),
+               'data': opb64e(ct).decode('utf-8')}
+
+    item = Items(details=json.dumps(details))
+
     keyset = Keysets(
         enc_pri_key=enc_pri_key.serialize(return_str=True),
         enc_sym_key=enc_sym_key.serialize(return_str=True),
@@ -90,7 +104,7 @@ def generate_password_sqlite(sk: str, password: str, email: str, first_name: str
 
     config = Config(name='EncryptedMasterKey', value=opb64e(emk).decode('utf-8'))
 
-    session.add_all([keyset, vault_access_key, account, config])
+    session.add_all([keyset, vault_access_key, account, config, item])
 
     session.commit()
 

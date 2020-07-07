@@ -280,7 +280,7 @@ class Upload(Resource):
             # get email, password, secret key
             email = request.values.get('email').strip().lower()
             password = request.values.get('password')
-            secret_key = request.json.get('secret_key').strip()
+            secret_key = request.values.get('secret_key').strip()
         except Exception as e:
             logging.info('invalid. ' + str(e))
             return {'message': '请求参数不完整'}, 200
@@ -307,5 +307,7 @@ class Upload(Resource):
 
         blob = request.files['attachment'].stream.read()
         user.sqlite_data = blob
+
+        db.session.commit()
 
         return {'message': 'success'}

@@ -46,7 +46,7 @@ class Items(Base):
     __tablename__ = 'items'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    detail = Column(Text(length=-1))
+    details = Column(Text(length=-1))
 
 
 class Config(Base):
